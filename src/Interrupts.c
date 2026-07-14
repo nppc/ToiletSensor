@@ -24,6 +24,8 @@
 //
 SI_INTERRUPT (SMBUS0_ISR, SMBUS0_IRQn)
   {
+//    SMB0CN0_SI = 0;
+  /*
     bit FAIL = 0; // Used by the ISR to flag failed
     // transfers
     static bit ADDR_SEND = 0;// Used by the ISR to flag byte
@@ -105,6 +107,7 @@ SI_INTERRUPT (SMBUS0_ISR, SMBUS0_IRQn)
         NUM_ERRORS++;// Indicate an error occurred
       }
     SMB0CN0_SI = 0; // Clear interrupt flag
+*/
   }
 
 //-----------------------------------------------------------------------------
