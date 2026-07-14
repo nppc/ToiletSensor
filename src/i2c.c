@@ -263,9 +263,6 @@ uint8_t eeprom_read_byte_simple(uint16_t address)
     uint16_t wait_count;
     uint8_t smb_status;
 
-    // --- CRITICAL FIX: disable SMBus interrupt (polling mode only)
-    EIE1 &= ~0x01;   // Disable SMBus interrupt (adjust bit if needed)
-
     // --- Bus free check
     wait_count = 10000;
     while (((SDA == 0) || (SCL == 0)) && wait_count--);
@@ -339,18 +336,15 @@ uint8_t eeprom_read_byte_simple(uint16_t address)
     if (smb_status != 0xC0) goto error;
 
     // --- READ 1 BYTE (NACK)
-    SMB0CN0_ACK = 1;     // NACK (last byte)
+    SMB0CN0_ACK = 0;     // NACK (last byte)
     SMB0CN0_SI = 0;
 
     wait_count = 50000;
-//    while ((SMB0CN0_SI == 0) && wait_count--){
-    while ((SMB0CN0_SI == 0)){
-        NOP(); // check for BSY
-    }
-//    if (wait_count == 0) goto error;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto error;
 
     smb_status = SMB0CN0 & 0xF0;
-//    if (smb_status != 0xE0) goto error;
+    if (smb_status != 0x80) goto error;
 
     read_byte = SMB0DAT;
 
