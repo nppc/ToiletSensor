@@ -57,21 +57,20 @@ static uint16_t g_blockBaseOffset;      /* Absolute offset of the current block 
 static uint16_t g_blockDataOffset;      /* First byte of compressed data for the current block. */
 static uint16_t g_blockBytesRemaining;  /* Compressed bytes left to fetch in this block. */
 static uint16_t g_blockCurrentOffset;   /* Current byte offset within block data (for fast address calc). */
-static bit      g_nibbleState;          /* 0 = low nibble next, 1 = high nibble next. */
+bit      g_nibbleState;          /* 0 = low nibble next, 1 = high nibble next. */
 static uint8_t  g_currentByte;         /* Cached encoded byte, split into two samples. */
 
-static bit      g_playing;             /* Nonzero while playback is active. */
-static bit      g_blockDone;           /* Set when the current block has been fully decoded. */
-uint16_t g_fifoSamplesPending;  /* Decoded samples waiting in FIFO for the DAC. */
+bit      g_playing;             /* Nonzero while playback is active. */
+bit      g_blockDone;           /* Set when the current block has been fully decoded. */
+bit      g_bufferValid;         /* Set when buffer has at least one sample ready. */
 
-static uint16_t g_pcmWr;               /* FIFO write index. */
-uint16_t g_pcmRd;               /* FIFO read index. */
-uint16_t g_pcmCount;            /* Number of samples currently buffered. */
+uint8_t  g_pcmWr;               /* FIFO write index (0-255, wraps naturally). */
+uint8_t g_pcmRd;               /* FIFO read index (0-255, wraps naturally). */
 
 /*
  * PCM buffer in XRAM.
- * On EFM8 you will likely want to place this with your compiler-specific
- * XRAM keyword / pragma.
+ * 256 samples (U16_U8 is 2 bytes per sample = 512 bytes total).
+ * Index wraps naturally with uint8_t arithmetic (0-255).
  */
 U16_U8 xdata g_pcmBuffer[ADPCM_PCM_BUF_SIZE]; /* FIFO storage for DAC samples. */
 
@@ -130,19 +129,31 @@ static bit I2C_EepromReadPoll(uint16_t address, uint8_t *value)
 
 static void ADPCM_ResetPcmFifo(void)
 {
-    g_pcmWr = 0;
-    g_pcmRd = 0;
-    g_pcmCount = 0;
+    uint16_t i;
+    
+    /* Prefill buffer with silence (2048 = midpoint). */
+    for(i = 0u; i < ADPCM_PCM_BUF_SIZE; i++)
+    {
+        g_pcmBuffer[i].u16 = ADPCM_DAC_MIDPOINT;
+    }
+    
+    g_pcmWr = 0u;
+    g_pcmRd = 0u;
+    g_bufferValid = 1;  /* Buffer is prefilled with silence, so it's valid. */
 }
 
 static bit ADPCM_PcmFifoPush(uint16_t sample)
 {
-    if(g_pcmCount >= ADPCM_PCM_BUF_SIZE)
-        return 0;
-
+    uint8_t nextWr = (uint8_t)(g_pcmWr + 1u);
+    uint8_t headroom = (uint8_t)(g_pcmWr - g_pcmRd);
+    
+    /* Check if we have enough headroom (at least ADPCM_PCM_HEADROOM samples ahead of read pointer). */
+    if(headroom < ADPCM_PCM_HEADROOM)
+        return 0;  /* Not enough space; decoder should wait. */
+    
     g_pcmBuffer[g_pcmWr].u16 = sample;
-    g_pcmWr = (g_pcmWr + 1) & 0x3FF;  /* Bitwise AND for 1024-byte wrap. */
-    g_pcmCount++;
+    g_pcmWr = nextWr;  /* Wraps naturally at 256. */
+    g_bufferValid = 1;  /* Mark buffer as having valid data. */
     return 1;
 }
 
@@ -151,6 +162,7 @@ static uint16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t
     int16_t step;
     int16_t diff;
     int16_t nextIndex;
+    int16_t dacSample;
     uint16_t dacValue;
 
     /* Clamp step index (rare, but safe). */
@@ -185,8 +197,21 @@ static uint16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t
         nextIndex = 88;
     *stepIndex = (uint8_t)nextIndex;
 
-    /* Convert predictor to 12-bit DAC value. */
-    dacValue = (uint16_t)(*predictor + ADPCM_DAC_MIDPOINT);
+    /*
+     * Convert predictor to 12-bit DAC value.
+     *
+     * The predictor is a full-range signed 16-bit sample (+/-32767), but the
+     * DAC only has 12 bits of unsigned range (0-4095, i.e. +/-2047 around
+     * the midpoint). Simply adding the midpoint without scaling clips almost
+     * every sample above roughly +/-2047, badly distorting the waveform.
+     * Instead, scale the sample down by the 16-bit -> 12-bit ratio (4 bits,
+     * i.e. divide by 16) before centering it, so the full dynamic range maps
+     * evenly into the DAC's window. This is a single arithmetic shift, which
+     * is cheap even on an 8-bit core.
+     */
+    dacSample = (int16_t)(*predictor >> 4);
+    dacValue  = (uint16_t)(dacSample + ADPCM_DAC_MIDPOINT);
+
     if(dacValue > 4095u)
         dacValue = 4095u;
 
@@ -259,9 +284,8 @@ void ADPCM_Start(uint16_t streamLength)
     g_blockBaseOffset = 0u;
     g_playing = 1;
     g_blockDone = 0;
-    g_fifoSamplesPending = 0u;
 
-    ADPCM_ResetPcmFifo();
+    ADPCM_ResetPcmFifo();  /* Prefills with silence and resets indices. */
     (void)ADPCM_LoadBlockHeader();
 }
 
@@ -341,44 +365,45 @@ void ADPCM_Task(void)
     uint16_t sample;
 
     /* Fill the FIFO from EEPROM as long as space is available and playback is active. */
-    /* Stop at threshold to allow ISR to drain while decoder prepares next block. */
-    while(g_playing && g_pcmCount < ADPCM_PCM_THRESHOLD)
+    /* Decoder stops when headroom drops below threshold (checked in ADPCM_PcmFifoPush). */
+    while(g_playing)
     {
         if(!ADPCM_DecodeOneSample(&sample))
             return;  /* No more data or I2C not ready. */
 
         if(!ADPCM_PcmFifoPush(sample))
-            return;  /* FIFO full. */
-
-        g_fifoSamplesPending++;
+            return;  /* Not enough headroom; wait for ISR to drain. */
     }
 }
 
 /*===========================================================================
     TIMER ISR EXAMPLE
 
-    This is the no-call ISR model you asked for. The decoder task fills the
-    FIFO in the background. The interrupt only consumes one sample and writes
-    it to the DAC.
-
-    g_fifoSamplesPending reaches zero when the last decoded sample has been
-    consumed, which marks end of message.
+    Minimal ISR: just read from buffer and advance pointer.
+    The decoder task maintains the headroom, so underruns should not occur.
+    
+    When playback ends (g_playing = 0), the ISR will continue reading silence
+    from the prefilled buffer until the decoder catches up.
 ===========================================================================*/
 
 /*
 void Timer2_ISR(void) interrupt 5
 {
-    if(g_fifoSamplesPending != 0u)
+    if(g_bufferValid)
     {
-        DAC0 = g_pcmBuffer[g_pcmRd];
-
-        g_pcmRd = (g_pcmRd + 1) & 0x3FF;  // Bitwise AND for 1024-byte wrap.
-        g_pcmCount--;
-        g_fifoSamplesPending--;
+        DAC0L = g_pcmBuffer[g_pcmRd].u8[0];  // Low byte
+        DAC0H = g_pcmBuffer[g_pcmRd].u8[1];  // High byte
+        g_pcmRd++;                            // Advance and wrap naturally at 256.
+        
+        // Check if we've caught up to the write pointer (buffer empty).
+        if(g_pcmRd == g_pcmWr)
+            g_bufferValid = 0;  // Buffer is now empty.
     }
     else
     {
-        DAC0 = ADPCM_DAC_MIDPOINT;
+        // Buffer underrun: play silence.
+        DAC0L = (uint8_t)(ADPCM_DAC_MIDPOINT & 0xFF);
+        DAC0H = (uint8_t)((ADPCM_DAC_MIDPOINT >> 8) & 0xFF);
     }
 }
 */

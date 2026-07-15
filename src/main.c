@@ -13,12 +13,14 @@ void SiLabs_Startup(void) {
 
 }
 
-
 int main(void) {
-
+  uint8_t retval;
   enter_DefaultMode_from_RESET();
 
-  //i2c_init();
+  //test_write_flash_data();
+
+//  retval = test_verify_flash_data();
+
   ADPCM_Start(11264);
 
 

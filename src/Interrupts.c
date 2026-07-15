@@ -30,22 +30,22 @@ SI_INTERRUPT (TIMER3_ISR, TIMER3_IRQn)
   {
     SFRPAGE = 0x30; // page will be restored automatically at interrupt exit
 
-    if(g_fifoSamplesPending != 0u)
-      {
-        DAC0L = g_pcmBuffer[g_pcmRd].u8[1]; // low byte
-        DAC0H = g_pcmBuffer[g_pcmRd].u8[0];// high byte
-
-        g_pcmRd++;
-        g_pcmRd &= 0x3FF;
-
-        g_pcmCount--;
-        g_fifoSamplesPending--;
-      }
+   if(g_bufferValid)
+    {
+        DAC0L = g_pcmBuffer[g_pcmRd].u8[1];  // Low byte
+        DAC0H = g_pcmBuffer[g_pcmRd].u8[0];  // High byte
+        g_pcmRd++;                            // Advance and wrap naturally at 256.
+        
+        // Check if we've caught up to the write pointer (buffer empty).
+        if(g_pcmRd == g_pcmWr)
+            g_bufferValid = 0;  // Buffer is now empty.
+    }
     else
-      {
-        DAC0L = (ADPCM_DAC_MIDPOINT & 0xFF);
-        DAC0H = (ADPCM_DAC_MIDPOINT >> 8);
-      }
+    {
+        // Buffer underrun: play silence.
+        DAC0L = (uint8_t)(ADPCM_DAC_MIDPOINT & 0xFF);
+        DAC0H = (uint8_t)((ADPCM_DAC_MIDPOINT >> 8) & 0xFF);
+    }
 
     TMR3CN0 &= ~TMR3CN0_TF3H__BMASK; // Clear Timer3 interrupt-pending flag
 

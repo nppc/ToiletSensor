@@ -11,7 +11,7 @@ void waitNms(uint16_t ms){
 	while(ms!=0){
 		tmp = PCA0L; // we need to read first PCA0L to latch PCA0H
 		tmp = PCA0H;
-		tmp+=105;	// don't yet know why 105 and not 96...
+		tmp+=96*2;	// don't yet know why 105 and not 96...
 			while(1){
 				tmp1 = PCA0L; // we need to read first PCA0L to latch PCA0H
 				tmp1 = PCA0H;
