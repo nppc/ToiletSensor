@@ -32,7 +32,7 @@ int main(void) {
       ADPCM_Task();
 
       if(!ADPCM_IsBusy()){
-          waitNms(500);
+          waitNms(200);
           ADPCM_Start(11264);
       }
   }

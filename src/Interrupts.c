@@ -28,6 +28,8 @@
 //#pragma REGISTERBANK(1)
 SI_INTERRUPT (TIMER3_ISR, TIMER3_IRQn)
   {
+    TMR3CN0 &= ~TMR3CN0_TF3H__BMASK; // Clear Timer3 interrupt-pending flag
+
     SFRPAGE = 0x30; // page will be restored automatically at interrupt exit
 
    if(g_bufferValid)
@@ -46,8 +48,6 @@ SI_INTERRUPT (TIMER3_ISR, TIMER3_IRQn)
         DAC0L = (uint8_t)(ADPCM_DAC_MIDPOINT & 0xFF);
         DAC0H = (uint8_t)((ADPCM_DAC_MIDPOINT >> 8) & 0xFF);
     }
-
-    TMR3CN0 &= ~TMR3CN0_TF3H__BMASK; // Clear Timer3 interrupt-pending flag
 
   }
 
