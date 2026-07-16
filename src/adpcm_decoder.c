@@ -137,7 +137,7 @@ static void ADPCM_ResetPcmFifo(void)
         g_pcmBuffer[i].u16 = ADPCM_DAC_MIDPOINT;
     }
     
-    g_pcmWr = 0u;
+    g_pcmWr = ADPCM_PCM_HEADROOM;
     g_pcmRd = 0u;
     g_bufferValid = 1;  /* Buffer is prefilled with silence, so it's valid. */
 }
@@ -145,10 +145,10 @@ static void ADPCM_ResetPcmFifo(void)
 static bit ADPCM_PcmFifoPush(uint16_t sample)
 {
     uint8_t nextWr = (uint8_t)(g_pcmWr + 1u);
-    uint8_t headroom = (uint8_t)(g_pcmWr - g_pcmRd);
+    uint8_t available = (uint8_t)(g_pcmRd - g_pcmWr - 1u);
     
     /* Check if we have enough headroom (at least ADPCM_PCM_HEADROOM samples ahead of read pointer). */
-    if(headroom < ADPCM_PCM_HEADROOM)
+    if(available < ADPCM_PCM_HEADROOM)
         return 0;  /* Not enough space; decoder should wait. */
     
     g_pcmBuffer[g_pcmWr].u16 = sample;
