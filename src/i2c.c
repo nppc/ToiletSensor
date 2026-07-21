@@ -15,6 +15,10 @@ static uint8_t nb_read_state = 0;   // 0=idle, 1=waiting for byte
 static uint8_t nb_read_byte = 0xFF;
 static uint8_t nb_read_ready = 0;
 
+// Non-blocking continuous read state
+static uint8_t nb_read_continuous_active = 0;
+static uint16_t nb_read_continuous_remaining = 0;
+
 //=============================================================================
 // i2c_init - Initialize I2C interface
 //=============================================================================
@@ -23,6 +27,8 @@ void i2c_init(void)
     NUM_ERRORS = 0;
     nb_read_state = 0;
     nb_read_ready = 0;
+    nb_read_continuous_active = 0;
+    nb_read_continuous_remaining = 0;
 }
 
 //=============================================================================
@@ -147,7 +153,7 @@ error:
 // Parameters: address (16-bit starting address), data (pointer to byte array), length (number of bytes)
 // Returns: 0 if success, 1 if error
 //=============================================================================
-uint8_t eeprom_page_write(uint16_t address, uint8_t *dataarray, uint16_t length)
+uint8_t eeprom_page_write(uint16_t address, uint8_t *databytes, uint16_t length)
 {
     uint16_t i;
     uint16_t wait_count;
@@ -207,7 +213,7 @@ uint8_t eeprom_page_write(uint16_t address, uint8_t *dataarray, uint16_t length)
 
     // --- Write all data bytes
     for (i = 0; i < length; i++) {
-        SMB0DAT = dataarray[i];
+        SMB0DAT = databytes[i];
         SMB0CN0_SI = 0;
 
         wait_count = 10000;
@@ -243,6 +249,33 @@ page_write_error:
 
 //=============================================================================
 // NON-BLOCKING EEPROM READ FUNCTIONS
+//=============================================================================
+
+// Usage examples:
+//
+// Single-byte non-blocking read:
+//   if (eeprom_read_start(address) == 0) {
+//       while (!eeprom_read_poll()) {
+//           // do other work
+//       }
+//       uint8_t value = eeprom_read_get_byte();
+//   }
+//
+// Continuous non-blocking read of N bytes:
+//   if (eeprom_read_continuous_start(address, length) == 0) {
+//       uint16_t index = 0;
+//       while (eeprom_read_continuous_is_active()) {
+//           if (eeprom_read_continuous_poll()) {
+//               buffer[index++] = eeprom_read_continuous_get_byte();
+//           }
+//           // do other work while waiting for EEPROM
+//       }
+//   }
+//
+// Notes:
+// - eeprom_read_continuous_start() begins the read transaction and returns immediately.
+// - eeprom_read_continuous_poll() should be called repeatedly until it returns 1.
+// - Each poll-ready event delivers one byte via eeprom_read_continuous_get_byte().
 //=============================================================================
 
 //=============================================================================
@@ -391,6 +424,275 @@ uint8_t eeprom_read_get_byte(void)
 }
 
 //=============================================================================
+// Non-blocking continuous EEPROM read helpers
+//=============================================================================
+uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
+{
+    uint16_t wait_count;
+    uint8_t smb_status;
+
+    if (length == 0) {
+        return 1;
+    }
+
+    if (nb_read_state != 0 || nb_read_continuous_active) {
+        return 1;  // Busy
+    }
+
+    // --- Bus free check
+    wait_count = 10000;
+    while (((SDA == 0) || (SCL == 0)) && wait_count--);
+    if (wait_count == 0) {
+        NUM_ERRORS++;
+        return 1;
+    }
+
+    // --- START
+    SMB0CN0_STA = 1;
+    wait_count = 50000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
+
+    // --- SLA+W
+    SMB0DAT = EEPROM_ADDR;
+    SMB0CN0_STA = 0;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto cont_error;
+
+    // --- address high byte
+    SMB0DAT = (address >> 8) & 0xFF;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto cont_error;
+
+    // --- address low byte
+    SMB0DAT = address & 0xFF;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto cont_error;
+
+    // --- REPEATED START (terminates write, starts read)
+    SMB0CN0_STA = 1;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
+
+    // --- SLA+R
+    SMB0DAT = EEPROM_ADDR + 1;
+    SMB0CN0_STA = 0;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto cont_error;
+
+    // Prepare for first byte
+    SMB0CN0_ACK = (length > 1) ? 1 : 0;
+    SMB0CN0_SI = 0;
+
+    nb_read_continuous_active = 1;
+    nb_read_continuous_remaining = length;
+    nb_read_ready = 0;
+
+    return 0;
+
+cont_error:
+    NUM_ERRORS++;
+    SMB0CN0_STO = 1;
+    SMB0CN0_SI = 0;
+    return 1;
+}
+
+uint8_t eeprom_read_continuous_poll(void)
+{
+    uint8_t smb_status;
+
+    if (!nb_read_continuous_active) {
+        return 0;
+    }
+
+    if (!SMB0CN0_SI) {
+        return 0;
+    }
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MRDB) {
+        NUM_ERRORS++;
+        nb_read_continuous_active = 0;
+        return 0;
+    }
+
+    nb_read_byte = SMB0DAT;
+    nb_read_ready = 1;
+
+    nb_read_continuous_remaining--;
+    if (nb_read_continuous_remaining == 0) {
+        SMB0CN0_STO = 1;
+        SMB0CN0_SI = 0;
+        nb_read_continuous_active = 0;
+    } else {
+        SMB0CN0_ACK = (nb_read_continuous_remaining == 1) ? 0 : 1;
+        SMB0CN0_SI = 0;
+    }
+
+    return 1;
+}
+
+uint8_t eeprom_read_continuous_get_byte(void)
+{
+    if (!nb_read_ready) {
+        return 0xFF;
+    }
+
+    nb_read_ready = 0;
+    return nb_read_byte;
+}
+
+uint8_t eeprom_read_continuous_is_active(void)
+{
+    return nb_read_continuous_active;
+}
+
+//=============================================================================
+// eeprom_read_continuous - Read multiple bytes from EEPROM in one transaction
+// Parameters: address (16-bit starting address), buffer (destination), length (number of bytes)
+// Returns: 0 if success, 1 if error
+//=============================================================================
+uint8_t eeprom_read_continuous(uint16_t address, uint8_t *buffer, uint16_t length)
+{
+    uint16_t i;
+    uint16_t wait_count;
+    uint8_t smb_status;
+
+    if (length == 0 || buffer == NULL) {
+        return 1;
+    }
+
+    // --- Bus free check
+    wait_count = 10000;
+    while (((SDA == 0) || (SCL == 0)) && wait_count--);
+    if (wait_count == 0) {
+        NUM_ERRORS++;
+        return 1;
+    }
+
+    // --- START
+    SMB0CN0_STA = 1;
+    wait_count = 50000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto continuous_error;
+
+    // --- SLA+W
+    SMB0DAT = EEPROM_ADDR;
+    SMB0CN0_STA = 0;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto continuous_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto continuous_error;
+
+    // --- address high byte
+    SMB0DAT = (address >> 8) & 0xFF;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto continuous_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto continuous_error;
+
+    // --- address low byte
+    SMB0DAT = address & 0xFF;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto continuous_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto continuous_error;
+
+    // --- REPEATED START (terminates write, starts read)
+    SMB0CN0_STA = 1;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto continuous_error;
+
+    // --- SLA+R
+    SMB0DAT = EEPROM_ADDR + 1;
+    SMB0CN0_STA = 0;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto continuous_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto continuous_error;
+
+    // --- Read bytes
+    for (i = 0; i < length; i++) {
+        SMB0CN0_ACK = (i < (length - 1)) ? 1 : 0;
+        SMB0CN0_SI = 0;
+
+        wait_count = 10000;
+        while ((SMB0CN0_SI == 0) && wait_count--);
+        if (wait_count == 0) goto continuous_error;
+
+        smb_status = SMB0CN0 & 0xF0;
+        if (smb_status != SMB_MRDB) goto continuous_error;
+
+        buffer[i] = SMB0DAT;
+    }
+
+    // --- STOP
+    SMB0CN0_STO = 1;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_STO == 1) && wait_count--);
+
+    return 0;
+
+continuous_error:
+    NUM_ERRORS++;
+    SMB0CN0_STO = 1;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_STO == 1) && wait_count--);
+
+    return 1;
+}
+
+//=============================================================================
 // test_i2c - Test routine for EEPROM
 // Writes bytes 1-10 to addresses 0-9, then reads them back
 //=============================================================================
@@ -479,26 +781,25 @@ uint8_t test_verify_flash_data(void)
     uint16_t total_bytes = 11264;
     uint8_t read_byte;
     uint8_t expected_byte;
-
+    
     i2c_init();
-
+    
     NUM_ERRORS = 0;
-
+    
     // Read and verify all bytes
     while (bytes_verified < total_bytes) {
         read_byte = eeprom_read_byte_simple(address);
         expected_byte = g_adpcmFlashData[address];
-
+        
         if (read_byte != expected_byte) {
             NUM_ERRORS++;
             // Continue checking to find all mismatches
         }
-
+        
         address++;
         bytes_verified++;
     }
-
+    
     // Return 0 if all bytes match, 1 if any mismatch found
     return (NUM_ERRORS == 0) ? 0 : 1;
 }
-

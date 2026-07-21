@@ -14,7 +14,7 @@ void SiLabs_Startup(void) {
 }
 
 int main(void) {
-  uint8_t retval;
+//  uint8_t retval;
   enter_DefaultMode_from_RESET();
 
   //test_write_flash_data();

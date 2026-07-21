@@ -18,6 +18,7 @@
 ******************************************************************************/
 #include "main.h"
 #include "flash.h"
+#include "i2c.h"
 #include "adpcm_decoder.h"
 static const int16_t code adpcmStepTable[89] =
 {
@@ -47,6 +48,9 @@ static uint16_t g_blockSize;       /* Encoded block size: 256 or 512/1024 depend
 static int16_t  g_predictor;       /* Current ADPCM predictor sample. */
 static uint8_t  g_stepIndex;       /* Current ADPCM step-table index. */
 static uint8_t  g_blockHeaderSize; /* Number of header bytes at the start of each block. */
+static uint8_t  g_blockHeaderByteIndex;
+static uint8_t  g_blockHeaderBytes[ADPCM_BLOCK_HEADER_SIZE];
+static bit      g_needBlockHeaderLoad;
 static uint16_t g_blockBaseOffset;      /* Absolute offset of the current block in flash. */
 static uint16_t g_blockDataOffset;      /* First byte of compressed data for the current block. */
 static uint16_t g_blockBytesRemaining;  /* Compressed bytes left to fetch in this block. */
@@ -75,18 +79,24 @@ U16_U8 xdata g_pcmBuffer[ADPCM_PCM_BUF_SIZE]; /* FIFO storage for DAC samples. *
 */
 static uint16_t g_eepromReadAddress;
 static bit      g_eepromReadArmed;
-static uint8_t  g_eepromReadByte;
+//static uint8_t  g_eepromReadByte;
 static void I2C_HwStartEepromRead(uint16_t address)
 {
-   /* TODO: start a real I2C transaction on the bus. */
-   /* For now, read directly from flash array. */
-   g_eepromReadByte = g_adpcmFlashData[address];
+   g_eepromReadAddress = address;
+   g_eepromReadArmed = 1;
+   if(eeprom_read_start(address) != 0)
+   {
+       g_eepromReadArmed = 0;
+   }
 }
 static bit I2C_HwIsEepromReadReady(uint8_t *value)
 {
-   /* TODO: return 1 when I2C transaction completes and byte is ready. */
-   /* For now, always ready (synchronous flash read). */
-   *value = g_eepromReadByte;
+   if(!g_eepromReadArmed)
+       return 0;
+   if(!eeprom_read_poll())
+       return 0;
+   *value = eeprom_read_get_byte();
+   g_eepromReadArmed = 0;
    return 1;
 }
 static void I2C_EepromReadBegin(uint16_t address)
@@ -101,7 +111,6 @@ static bit I2C_EepromReadPoll(uint16_t address, uint8_t *value)
        I2C_EepromReadBegin(address);
    if(I2C_HwIsEepromReadReady(value))
    {
-       g_eepromReadArmed = 0;
        return 1;
    }
    return 0;
@@ -114,13 +123,13 @@ static bit I2C_EepromReadPoll(uint16_t address, uint8_t *value)
 static void ADPCM_ResetPcmFifo(void)
 {
    uint16_t i;
-
+  
    /* Prefill buffer with silence (2048 = midpoint). */
    for(i = 0u; i < ADPCM_PCM_BUF_SIZE; i++)
    {
        g_pcmBuffer[i].u16 = ADPCM_DAC_MIDPOINT;
    }
-    /* Start write pointer ahead to give decoder room to fill before ISR catches up. */
+	/* Start write pointer ahead to give decoder room to fill before ISR catches up. */   
    g_pcmWr = ADPCM_PCM_HEADROOM;
    g_pcmRd = 0u;
    g_bufferValid = 1;  /* Buffer is prefilled with silence, so it's valid. */
@@ -129,11 +138,11 @@ static bit ADPCM_PcmFifoPush(uint16_t sample)
 {
    uint8_t nextWr = (uint8_t)(g_pcmWr + 1u);
    uint8_t available = (uint8_t)(g_pcmRd - g_pcmWr - 1u);  /* Space available before catching read pointer. */
-
+  
    /* Check if we have enough space (at least ADPCM_PCM_HEADROOM samples gap). */
    if(available < ADPCM_PCM_HEADROOM)
        return 0;  /* Not enough space; decoder should wait. */
-
+  
    g_pcmBuffer[g_pcmWr].u16 = sample;
    g_pcmWr = nextWr;  /* Wraps naturally at 256. */
    g_bufferValid = 1;  /* Mark buffer as having valid data. */
@@ -192,27 +201,28 @@ static uint16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t
 }
 static bit ADPCM_ReadFlashByte(uint16_t address, uint8_t *value)
 {
-   *value = g_adpcmFlashData[address];
-   return 1;  // Always ready (synchronous read).
+   *value = eeprom_read_byte_simple(address);
+   return 1;
 }
 /*===========================================================================
    BLOCK STATE
 ===========================================================================*/
 static bit ADPCM_LoadBlockHeader(void)
 {
-   uint8_t b0;
-   uint8_t b1;
-   uint8_t b2;
-   uint8_t b3;
    /* Heavy path: block header fetch. Done in background, not in ISR. */
    if(g_blockSize < g_blockHeaderSize)
        return 0;
-   if(!ADPCM_ReadFlashByte((uint16_t)(g_blockBaseOffset + 0u), &b0)) return 0;
-   if(!ADPCM_ReadFlashByte((uint16_t)(g_blockBaseOffset + 1u), &b1)) return 0;
-   if(!ADPCM_ReadFlashByte((uint16_t)(g_blockBaseOffset + 2u), &b2)) return 0;
-   if(!ADPCM_ReadFlashByte((uint16_t)(g_blockBaseOffset + 3u), &b3)) return 0;
-   g_predictor = (int16_t)((uint16_t)b0 | ((uint16_t)b1 << 8));
-   g_stepIndex = b2;
+
+   while(g_blockHeaderByteIndex < g_blockHeaderSize)
+   {
+       uint16_t address = (uint16_t)(g_blockBaseOffset + g_blockHeaderByteIndex);
+       if(!ADPCM_ReadFlashByte(address, &g_blockHeaderBytes[g_blockHeaderByteIndex]))
+           return 0;
+       g_blockHeaderByteIndex++;
+   }
+
+   g_predictor = (int16_t)((uint16_t)g_blockHeaderBytes[0] | ((uint16_t)g_blockHeaderBytes[1] << 8));
+   g_stepIndex = g_blockHeaderBytes[2];
    g_blockDataOffset = (uint16_t)(g_blockBaseOffset + g_blockHeaderSize);
    g_blockBytesRemaining = (uint16_t)(g_blockSize - g_blockHeaderSize);
    g_blockCurrentOffset = 0u;  /* Reset offset tracker for this block. */
@@ -220,6 +230,7 @@ static bit ADPCM_LoadBlockHeader(void)
    g_currentByte = 0u;
    g_blockDone = 0;
    g_headerSamplePending = 1;  /* Header predictor is a verbatim sample; emit it before any nibble. */
+   g_blockHeaderByteIndex = 0;
    return 1;
 }
 static bit ADPCM_AdvanceToNextBlock(void)
@@ -244,10 +255,11 @@ void ADPCM_Start(uint16_t streamLength)
    g_blockBaseOffset = 0u;
    g_playing = 1;
    g_blockDone = 0;
-   g_headerSamplePending = 0;  /* Will be set by ADPCM_LoadBlockHeader() below. */
-   g_havePendingSample = 0;  /* <-- add this */
+   g_needBlockHeaderLoad = 1;
+   g_blockHeaderByteIndex = 0;
+   g_headerSamplePending = 0;  /* Will be set by ADPCM_LoadBlockHeader(). */
+   g_havePendingSample = 0;
    ADPCM_ResetPcmFifo();  /* Prefills with silence and resets indices. */
-   (void)ADPCM_LoadBlockHeader();
 }
 void ADPCM_Stop(void)
 {
@@ -272,6 +284,12 @@ static bit ADPCM_DecodeOneSample(uint16_t *sampleOut)
    /* Loop to handle block boundaries without recursion. */
    while(1)
    {
+       if(g_needBlockHeaderLoad)
+       {
+           if(!ADPCM_LoadBlockHeader())
+               return 0;
+           g_needBlockHeaderLoad = 0;
+       }
        if(g_headerSamplePending)
        {
            int16_t  dacSample;
@@ -354,7 +372,7 @@ void ADPCM_Task(void)
    TIMER ISR EXAMPLE
    Minimal ISR: just read from buffer and advance pointer.
    The decoder task maintains the headroom, so underruns should not occur.
-
+  
    When playback ends (g_playing = 0), the ISR will continue reading silence
    from the prefilled buffer until the decoder catches up.
 ===========================================================================*/
@@ -366,7 +384,7 @@ void Timer2_ISR(void) interrupt 5
        DAC0L = g_pcmBuffer[g_pcmRd].u8[0];  // Low byte
        DAC0H = g_pcmBuffer[g_pcmRd].u8[1];  // High byte
        g_pcmRd++;                            // Advance and wrap naturally at 256.
-
+      
        // Check if we've caught up to the write pointer (buffer empty).
        if(g_pcmRd == g_pcmWr)
            g_bufferValid = 0;  // Buffer is now empty.
@@ -379,4 +397,3 @@ void Timer2_ISR(void) interrupt 5
    }
 }
 */
-
