@@ -3,7 +3,7 @@
 
 #define ADPCM_BLOCK_SIZE       256u // block size
 #define ADPCM_PCM_BUF_SIZE     256u // decoded values (512 bytes, uint8_t wraps naturally)
-#define ADPCM_PCM_HEADROOM     20u   /* Minimum samples to keep ahead of ISR. */
+#define ADPCM_PCM_HEADROOM     40u   /* Minimum samples to keep ahead of ISR. */
 #define ADPCM_DAC_MIDPOINT     2048u
 #define ADPCM_BLOCK_HEADER_SIZE 4u
 
