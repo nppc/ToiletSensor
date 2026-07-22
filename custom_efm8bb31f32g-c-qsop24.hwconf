@@ -54,12 +54,12 @@
     <property object="TIMER16_3" propertyId="timer16.control.runcontrol" value="Start"/>
     <property object="TIMER16_3" propertyId="timer16.control.timerrunningstate" value="Timer is Running"/>
     <property object="TIMER16_3" propertyId="timer16.highbyte.highbyte" value="56"/>
-    <property object="TIMER16_3" propertyId="timer16.initandreloadvalue.targetoverflowfrequency" value="11052"/>
+    <property object="TIMER16_3" propertyId="timer16.initandreloadvalue.targetoverflowfrequency" value="22050"/>
     <property object="TIMER16_3" propertyId="timer16.initandreloadvalue.timerinitvalue" value="14494"/>
-    <property object="TIMER16_3" propertyId="timer16.initandreloadvalue.timerreloadvalue" value="61102"/>
+    <property object="TIMER16_3" propertyId="timer16.initandreloadvalue.timerreloadvalue" value="63314"/>
     <property object="TIMER16_3" propertyId="timer16.lowbyte.lowbyte" value="158"/>
-    <property object="TIMER16_3" propertyId="timer16.reloadhighbyte.reloadhighbyte" value="238"/>
-    <property object="TIMER16_3" propertyId="timer16.reloadlowbyte.reloadlowbyte" value="174"/>
+    <property object="TIMER16_3" propertyId="timer16.reloadhighbyte.reloadhighbyte" value="247"/>
+    <property object="TIMER16_3" propertyId="timer16.reloadlowbyte.reloadlowbyte" value="82"/>
     <property object="TIMER16_4" propertyId="ABPeripheral.included" value="true"/>
     <property object="TIMER16_5" propertyId="ABPeripheral.included" value="true"/>
     <property object="TIMER_SETUP_0" propertyId="ABPeripheral.included" value="true"/>

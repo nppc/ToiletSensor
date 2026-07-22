@@ -9,7 +9,6 @@
 
 // USER INCLUDES
 #include "main.h"
-#include "i2c.h"
 #include "adpcm_decoder.h"
 
 //-----------------------------------------------------------------------------
@@ -48,19 +47,6 @@ SI_INTERRUPT (TIMER3_ISR, TIMER3_IRQn)
         DAC0L = (uint8_t)(ADPCM_DAC_MIDPOINT & 0xFF);
         DAC0H = (uint8_t)((ADPCM_DAC_MIDPOINT >> 8) & 0xFF);
       }
-
-  }
-
-//-----------------------------------------------------------------------------
-// SMBUS0_ISR
-//-----------------------------------------------------------------------------
-//
-// SMBUS0 ISR Content goes here. Remember to clear flag bits:
-// SMB0CN0::SI (SMBus Interrupt Flag)
-//
-//-----------------------------------------------------------------------------
-SI_INTERRUPT (SMBUS0_ISR, SMBUS0_IRQn)
-  {
 
   }
 

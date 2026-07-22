@@ -49,7 +49,7 @@ static int16_t  g_predictor;       /* Current ADPCM predictor sample. */
 static uint8_t  g_stepIndex;       /* Current ADPCM step-table index. */
 static uint8_t  g_blockHeaderSize; /* Number of header bytes at the start of each block. */
 static uint8_t  g_blockHeaderByteIndex;
-static uint8_t  g_blockHeaderBytes[ADPCM_BLOCK_HEADER_SIZE];
+static uint8_t idata g_blockHeaderBytes[ADPCM_BLOCK_HEADER_SIZE];
 static bit      g_needBlockHeaderLoad;
 static uint16_t g_blockBaseOffset;      /* Absolute offset of the current block in flash. */
 static uint16_t g_blockBytesRemaining;  /* Compressed bytes left to fetch in this block. */
@@ -63,6 +63,11 @@ uint8_t  g_pcmWr;               /* FIFO write index (0-255, wraps naturally). */
 uint8_t g_pcmRd;               /* FIFO read index (0-255, wraps naturally). */
 uint16_t g_pendingSample;
 bit      g_havePendingSample;
+
+/* Interpolation state: keep previous decoded sample to average with current. */
+uint16_t g_prevDecodedSample;
+bit      g_havePrevSample;      /* Set when g_prevDecodedSample is valid. */
+bit      g_interpolateNext;     /* Set when we need to push average before pushing real sample. */
 
 /*
 * PCM buffer in XRAM.
@@ -156,12 +161,10 @@ static uint16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t
    return dacValue;
 }
 
-/* Pulls the next sequential byte out of the current block's continuous I2C
- * transfer. The caller (ADPCM_LoadBlockHeader / ADPCM_DecodeOneSample) must
- * have already ensured a block-wide transfer is running via
- * eeprom_read_continuous_start(g_blockBaseOffset, g_blockSize) -- no address
- * is passed here because the EEPROM's own address pointer auto-increments,
- * so one open transaction can stream out every byte of the block in order. */
+/* Pulls the next sequential byte in continuous I2C
+ * transfer. No address is passed here because
+ * the EEPROM's own address pointer auto-increments,
+ */
 static bit ADPCM_ReadFlashByte(uint8_t *value)
 {
    if(!eeprom_read_continuous_poll()){
@@ -249,6 +252,10 @@ void ADPCM_Start(uint16_t streamLength)
    g_headerSamplePending = 0;  /* Will be set by ADPCM_LoadBlockHeader(). */
    g_havePendingSample = 0;
 
+   g_havePrevSample = 0;        /* No previous sample yet for interpolation. */
+   g_interpolateNext = 0;       /* Will be set once we have a pair. */
+
+
    ADPCM_ResetPcmFifo();  /* Prefills with silence and resets indices. */
 
    /* Start ONE continuous EEPROM read of the whole stream */
@@ -259,12 +266,6 @@ void ADPCM_Start(uint16_t streamLength)
     }
 }
 
-/*
-void ADPCM_Stop(void)
-{
-   g_playing = 0;
-}
-*/
 
 bit ADPCM_IsBusy(void)
 {
@@ -357,6 +358,52 @@ void ADPCM_Task(void)
             return;  /* FIFO full; retry this same sample next call. */
 
         g_havePendingSample = 0;
+    }
+}
+
+
+void ADPCM_Task_interpolated(void)
+{
+    uint16_t average;
+
+    while(g_playing)
+    {
+        /* Make sure we have a decoded sample first. */
+        if(!g_havePendingSample)
+        {
+            if(!ADPCM_DecodeOneSample(&g_pendingSample))
+                return;  /* No more data. */
+
+            g_havePendingSample = 1;
+        }
+
+        /* First output the interpolated sample, but only if we already
+           have a previous real sample. */
+        if(g_havePrevSample && g_interpolateNext)
+        {
+            average = (uint16_t)(((uint32_t)g_prevDecodedSample +
+                                  (uint32_t)g_pendingSample + 1u) >> 1);
+
+            if(!ADPCM_PcmFifoPush(average))
+                return;  /* FIFO full; retry average next call. */
+
+            g_interpolateNext = 0;
+        }
+
+        /* Then output the real decoded sample. */
+        if(!ADPCM_PcmFifoPush(g_pendingSample))
+            return;  /* FIFO full; retry this sample next call. */
+
+        /* Save it as previous sample. */
+        g_prevDecodedSample = g_pendingSample;
+        g_havePrevSample = 1;
+
+        /* Current sample is consumed. */
+        g_havePendingSample = 0;
+
+        /* Next decoded sample should have an interpolated value inserted
+           before it. */
+        g_interpolateNext = 1;
     }
 }
 

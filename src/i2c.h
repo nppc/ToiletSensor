@@ -28,7 +28,6 @@
 //-----------------------------------------------------------------------------
 // Global VARIABLES
 //-----------------------------------------------------------------------------
-extern unsigned char SMB_DATA_OUT;   // Data to transmit
 extern unsigned long NUM_ERRORS;     // Error counter
 
 SI_SBIT(SDA, SFR_P0, 2);
@@ -42,17 +41,15 @@ void i2c_init(void);
 
 // EEPROM read helpers
 uint8_t eeprom_read_byte_simple(uint16_t address);
-uint8_t eeprom_read_start(uint16_t address);
-uint8_t eeprom_read_poll(void);
-uint8_t eeprom_read_get_byte(void);
 uint8_t eeprom_read_continuous(uint16_t address, uint8_t *buffer, uint16_t length);
-uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length);
-uint8_t eeprom_read_continuous_poll(void);
+
+bit eeprom_read_continuous_start(uint16_t address, uint16_t length);
+bit eeprom_read_continuous_poll(void);
 uint8_t eeprom_read_continuous_get_byte(void);
-uint8_t eeprom_read_continuous_is_active(void);
 
 // Test routine
-void test_i2c(void);
+//void test_i2c(void);
 void test_write_flash_data(void);
+bit test_verify_flash_data(void);
 
 #endif /* SRC_I2C_H_ */

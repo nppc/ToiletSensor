@@ -404,16 +404,16 @@ TIMER16_3_enter_DefaultMode_from_RESET (void)
 
   // $[TMR3RLH - Timer 3 Reload High Byte]
   /***********************************************************************
-   - Timer 3 Reload High Byte = 0xEE
+   - Timer 3 Reload High Byte = 0xF7
    ***********************************************************************/
-  TMR3RLH = (0xEE << TMR3RLH_TMR3RLH__SHIFT);
+  TMR3RLH = (0xF7 << TMR3RLH_TMR3RLH__SHIFT);
   // [TMR3RLH - Timer 3 Reload High Byte]$
 
   // $[TMR3RLL - Timer 3 Reload Low Byte]
   /***********************************************************************
-   - Timer 3 Reload Low Byte = 0xAE
+   - Timer 3 Reload Low Byte = 0x52
    ***********************************************************************/
-  TMR3RLL = (0xAE << TMR3RLL_TMR3RLL__SHIFT);
+  TMR3RLL = (0x52 << TMR3RLL_TMR3RLL__SHIFT);
   // [TMR3RLL - Timer 3 Reload Low Byte]$
 
   // $[TMR3CN0]

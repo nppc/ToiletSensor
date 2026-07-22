@@ -11,7 +11,7 @@
 unsigned long NUM_ERRORS = 0;       // Error counter
 
 // Non-blocking read state
-static uint8_t nb_read_state = 0;   // 0=idle, 1=waiting for byte
+//static uint8_t nb_read_state = 0;   // 0=idle, 1=waiting for byte
 static uint8_t nb_read_byte = 0xFF;
 static uint8_t nb_read_ready = 0;
 
@@ -27,7 +27,7 @@ void i2c_init(void)
 {
     uint8_t i;
     NUM_ERRORS = 0;
-    nb_read_state = 0;
+    //nb_read_state = 0;
     nb_read_byte = 0xFF;
     nb_read_ready = 0;
     nb_read_continuous_remaining = 0;
@@ -166,18 +166,15 @@ error:
 //=============================================================================
 // Typical usage:
 //   if (eeprom_read_continuous_start(address, length) == 0) {
-//       while (eeprom_read_continuous_is_active()) {
+//       for loop{
 //           if (eeprom_read_continuous_poll()) {
 //               byte = eeprom_read_continuous_get_byte();
 //           }
 //       }
 //   }
 //
-// The loop can also be driven purely by the number of bytes expected, but
-// eeprom_read_continuous_is_active() is a convenient way to know whether the
-// transaction is still in progress.
 //=============================================================================
-uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
+bit eeprom_read_continuous_start(uint16_t address, uint16_t length)
 {
     uint16_t wait_count;
     uint8_t smb_status;
@@ -186,7 +183,7 @@ uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
         return 1;
     }
 
-    if (nb_read_state != 0 || nb_read_continuous_remaining != 0) {
+    if (nb_read_continuous_remaining != 0) {
         return 1;  // Busy
     }
 
@@ -276,7 +273,7 @@ cont_error:
     return 1;
 }
 
-uint8_t eeprom_read_continuous_poll(void)
+bit eeprom_read_continuous_poll(void)
 {
     uint8_t smb_status;
 
@@ -326,188 +323,7 @@ uint8_t eeprom_read_continuous_get_byte(void)
     return nb_read_byte;
 }
 
-uint8_t eeprom_read_continuous_is_active(void)
-{
-    return (nb_read_continuous_remaining != 0);
-}
-
 /*
-//=============================================================================
-// NON-BLOCKING EEPROM READ FUNCTIONS
-//=============================================================================
-
-// Usage examples:
-//
-// Single-byte non-blocking read:
-//   if (eeprom_read_start(address) == 0) {
-//       while (!eeprom_read_poll()) {
-//           // do other work
-//       }
-//       uint8_t value = eeprom_read_get_byte();
-//   }
-//
-// Continuous non-blocking read of N bytes:
-//   if (eeprom_read_continuous_start(address, length) == 0) {
-//       uint16_t index = 0;
-//       while (eeprom_read_continuous_is_active()) {
-//           if (eeprom_read_continuous_poll()) {
-//               buffer[index++] = eeprom_read_continuous_get_byte();
-//           }
-//           // do other work while waiting for EEPROM
-//       }
-//   }
-//
-// Notes:
-// - eeprom_read_continuous_start() begins the read transaction and returns immediately.
-// - eeprom_read_continuous_poll() should be called repeatedly until it returns 1.
-// - Each poll-ready event delivers one byte via eeprom_read_continuous_get_byte().
-//=============================================================================
-
-//=============================================================================
-// eeprom_read_start - Initiate non-blocking read (blocking until address sent and first byte ready)
-// Parameters: address (16-bit address)
-// Returns: 0 if success, 1 if error
-// After this, call eeprom_read_poll() and eeprom_read_get_byte()
-//=============================================================================
-uint8_t eeprom_read_start(uint16_t address)
-{
-    uint16_t wait_count;
-    uint8_t smb_status;
-
-    // --- Bus free check
-    wait_count = 10000;
-    while (((SDA == 0) || (SCL == 0)) && wait_count--);
-    if (wait_count == 0) {
-        NUM_ERRORS++;
-        nb_read_state = 0;
-        return 1;
-    }
-
-    // --- START
-    SMB0CN0_STA = 1;
-    wait_count = 50000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto nb_read_error;
-
-    // --- SLA+W
-    SMB0DAT = EEPROM_ADDR;
-    SMB0CN0_STA = 0;
-    SMB0CN0_SI = 0;
-
-    wait_count = 10000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto nb_read_error;
-
-    smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto nb_read_error;
-
-    // --- address high byte
-    SMB0DAT = (address >> 8) & 0xFF;
-    SMB0CN0_SI = 0;
-
-    wait_count = 10000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto nb_read_error;
-
-    smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto nb_read_error;
-
-    // --- address low byte
-    SMB0DAT = address & 0xFF;
-    SMB0CN0_SI = 0;
-
-    wait_count = 10000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto nb_read_error;
-
-    smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto nb_read_error;
-
-    // --- REPEATED START (terminates write, starts read)
-    SMB0CN0_STA = 1;
-    SMB0CN0_SI = 0;
-
-    wait_count = 10000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto nb_read_error;
-
-    // --- SLA+R
-    SMB0DAT = EEPROM_ADDR + 1;
-    SMB0CN0_STA = 0;
-    SMB0CN0_SI = 0;
-
-    wait_count = 10000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto nb_read_error;
-
-    smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto nb_read_error;
-
-    // --- Prepare for first byte read (NACK for single byte)
-    SMB0CN0_ACK = 0;     // NACK (last byte)
-    SMB0CN0_SI = 0;
-
-    nb_read_state = 1;   // State: waiting for first byte
-    nb_read_ready = 0;
-
-    return 0;
-
-nb_read_error:
-    NUM_ERRORS++;
-    nb_read_state = 0;
-    return 1;
-}
-
-//=============================================================================
-// eeprom_read_poll - Check if byte is ready (non-blocking)
-// Returns: 1 if byte ready, 0 if still waiting
-//=============================================================================
-uint8_t eeprom_read_poll(void)
-{
-    if (nb_read_state == 0) {
-        return 0;  // Not in read mode
-    }
-
-    if (SMB0CN0_SI) {
-        nb_read_ready = 1;
-        return 1;
-    }
-
-    return 0;
-}
-
-//=============================================================================
-// eeprom_read_get_byte - Get the received byte and complete transaction
-// Returns: Byte read from EEPROM
-// Call this after eeprom_read_poll() returns 1
-//=============================================================================
-uint8_t eeprom_read_get_byte(void)
-{
-    uint8_t smb_status;
-
-    if (nb_read_state == 0 || !nb_read_ready) {
-        return 0xFF;  // Not ready
-    }
-
-    smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MRDB) {
-        NUM_ERRORS++;
-        nb_read_state = 0;
-        return 0xFF;
-    }
-
-    nb_read_byte = SMB0DAT;
-    nb_read_ready = 0;
-
-    // --- STOP
-    SMB0CN0_STO = 1;
-    SMB0CN0_SI = 0;
-
-    nb_read_state = 0;  // Read complete
-
-    return nb_read_byte;
-}
-
 //=============================================================================
 // eeprom_page_write - Write a page (up to 128 bytes) to EEPROM (blocking)
 // Parameters: address (16-bit starting address), data (pointer to byte array), length (number of bytes)
@@ -726,43 +542,6 @@ continuous_error:
 }
 
 //=============================================================================
-// test_i2c - Test routine for EEPROM
-// Writes bytes 1-10 to addresses 0-9, then reads them back
-//=============================================================================
-void test_i2c(void)
-{
-    unsigned char i;
-    unsigned char read_value;
-    
-    // Initialize I2C
-    i2c_init();
-    
-    // Check if slave is holding SDA low
-    while (!SDA) {
-        // Provide clock pulses to allow slave to advance
-        SCL = 0;
-        for (i = 0; i < 255; i++);
-        SCL = 1;
-        while (!SCL);
-        for (i = 0; i < 10; i++);
-    }
-    
-    NUM_ERRORS = 0;
-    
-    // Read test: Read bytes from addresses 0-9 using simple linear function
-    for (i = 0; i < 10; i++) {
-        read_value = eeprom_read_byte_simple(i);
-        
-        // Check if read value matches expected value (1-10)
-        if (read_value != (i + 1)) {
-            NUM_ERRORS++;
-        }
-    }
-    
-    // Test complete - NUM_ERRORS should be 0 if successful
-}
-
-//=============================================================================
 // test_write_flash_data - Write g_adpcmFlashData array to EEPROM starting at address 0
 // This writes the entire 11264 byte array in 128-byte pages
 //=============================================================================
@@ -806,7 +585,7 @@ void test_write_flash_data(void)
 // Reads back the data and compares with original
 // Returns: 0 if all data matches, 1 if mismatch found
 //=============================================================================
-uint8_t test_verify_flash_data(void)
+bit test_verify_flash_data(void)
 {
     extern const uint8_t code g_adpcmFlashData[];
     uint16_t address = 0;
