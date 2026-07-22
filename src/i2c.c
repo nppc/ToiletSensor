@@ -16,19 +16,32 @@ static uint8_t nb_read_byte = 0xFF;
 static uint8_t nb_read_ready = 0;
 
 // Non-blocking continuous read state
-static uint8_t nb_read_continuous_active = 0;
+// remaining == 0 means the transaction is idle; non-zero means it is active.
 static uint16_t nb_read_continuous_remaining = 0;
+static uint8_t nb_read_continuous_byte_ready = 0;  // Byte latched by poll(), consumed by get_byte()
 
 //=============================================================================
 // i2c_init - Initialize I2C interface
 //=============================================================================
 void i2c_init(void)
 {
+    uint8_t i;
     NUM_ERRORS = 0;
     nb_read_state = 0;
+    nb_read_byte = 0xFF;
     nb_read_ready = 0;
-    nb_read_continuous_active = 0;
     nb_read_continuous_remaining = 0;
+    nb_read_continuous_byte_ready = 0;
+
+    // Check if slave is holding SDA low
+    while (!SDA) {
+        // Provide clock pulses to allow slave to advance
+        SCL = 0;
+        for (i = 0; i < 255; i++);
+        SCL = 1;
+        while (!SCL);
+        for (i = 0; i < 10; i++);
+    }
 }
 
 //=============================================================================
@@ -149,18 +162,32 @@ error:
 }
 
 //=============================================================================
-// eeprom_page_write - Write a page (up to 128 bytes) to EEPROM (blocking)
-// Parameters: address (16-bit starting address), data (pointer to byte array), length (number of bytes)
-// Returns: 0 if success, 1 if error
+// Non-blocking continuous EEPROM read helpers
 //=============================================================================
-uint8_t eeprom_page_write(uint16_t address, uint8_t *databytes, uint16_t length)
+// Typical usage:
+//   if (eeprom_read_continuous_start(address, length) == 0) {
+//       while (eeprom_read_continuous_is_active()) {
+//           if (eeprom_read_continuous_poll()) {
+//               byte = eeprom_read_continuous_get_byte();
+//           }
+//       }
+//   }
+//
+// The loop can also be driven purely by the number of bytes expected, but
+// eeprom_read_continuous_is_active() is a convenient way to know whether the
+// transaction is still in progress.
+//=============================================================================
+uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
 {
-    uint16_t i;
     uint16_t wait_count;
     uint8_t smb_status;
 
-    if (length == 0 || length > 128) {
-        return 1;  // Invalid length
+    if (length == 0) {
+        return 1;
+    }
+
+    if (nb_read_state != 0 || nb_read_continuous_remaining != 0) {
+        return 1;  // Busy
     }
 
     // --- Bus free check
@@ -175,7 +202,7 @@ uint8_t eeprom_page_write(uint16_t address, uint8_t *databytes, uint16_t length)
     SMB0CN0_STA = 1;
     wait_count = 50000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto page_write_error;
+    if (wait_count == 0) goto cont_error;
 
     // --- SLA+W
     SMB0DAT = EEPROM_ADDR;
@@ -184,10 +211,10 @@ uint8_t eeprom_page_write(uint16_t address, uint8_t *databytes, uint16_t length)
 
     wait_count = 10000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto page_write_error;
+    if (wait_count == 0) goto cont_error;
 
     smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto page_write_error;
+    if (smb_status != SMB_MTDB) goto cont_error;
 
     // --- address high byte
     SMB0DAT = (address >> 8) & 0xFF;
@@ -195,10 +222,10 @@ uint8_t eeprom_page_write(uint16_t address, uint8_t *databytes, uint16_t length)
 
     wait_count = 10000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto page_write_error;
+    if (wait_count == 0) goto cont_error;
 
     smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto page_write_error;
+    if (smb_status != SMB_MTDB) goto cont_error;
 
     // --- address low byte
     SMB0DAT = address & 0xFF;
@@ -206,47 +233,105 @@ uint8_t eeprom_page_write(uint16_t address, uint8_t *databytes, uint16_t length)
 
     wait_count = 10000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto page_write_error;
+    if (wait_count == 0) goto cont_error;
 
     smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto page_write_error;
+    if (smb_status != SMB_MTDB) goto cont_error;
 
-    // --- Write all data bytes
-    for (i = 0; i < length; i++) {
-        SMB0DAT = databytes[i];
-        SMB0CN0_SI = 0;
-
-        wait_count = 10000;
-        while ((SMB0CN0_SI == 0) && wait_count--);
-        if (wait_count == 0) goto page_write_error;
-
-        smb_status = SMB0CN0 & 0xF0;
-        if (smb_status != SMB_MTDB) goto page_write_error;
-    }
-
-    // --- STOP
-    SMB0CN0_STO = 1;
+    // --- REPEATED START (terminates write, starts read)
+    SMB0CN0_STA = 1;
     SMB0CN0_SI = 0;
 
     wait_count = 10000;
-    while ((SMB0CN0_STO == 1) && wait_count--);
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
 
-    // Wait for EEPROM write cycle to complete (typical 5ms)
-    waitNms(10);
+    // --- SLA+R
+    SMB0DAT = EEPROM_ADDR + 1;
+    SMB0CN0_STA = 0;
+    SMB0CN0_SI = 0;
+
+    wait_count = 10000;
+    while ((SMB0CN0_SI == 0) && wait_count--);
+    if (wait_count == 0) goto cont_error;
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MTDB) goto cont_error;
+
+    // Prepare for first byte
+    SMB0CN0_ACK = (length > 1) ? 1 : 0;
+    SMB0CN0_SI = 0;
+
+    nb_read_continuous_remaining = length;
+    nb_read_byte = 0xFF;
+    nb_read_ready = 0;
+    nb_read_continuous_byte_ready = 0;
 
     return 0;
 
-page_write_error:
+cont_error:
     NUM_ERRORS++;
     SMB0CN0_STO = 1;
     SMB0CN0_SI = 0;
+    return 1;
+}
 
-    wait_count = 10000;
-    while ((SMB0CN0_STO == 1) && wait_count--);
+uint8_t eeprom_read_continuous_poll(void)
+{
+    uint8_t smb_status;
+
+    if (nb_read_continuous_remaining == 0) {
+        return 0;
+    }
+
+    if (nb_read_continuous_byte_ready) {
+        return 1;
+    }
+
+    if (!SMB0CN0_SI) {
+        return 0;
+    }
+
+    smb_status = SMB0CN0 & 0xF0;
+    if (smb_status != SMB_MRDB) {
+        NUM_ERRORS++;
+        nb_read_continuous_remaining = 0;
+        nb_read_continuous_byte_ready = 0;
+        return 0;
+    }
+
+    nb_read_byte = SMB0DAT;
+    nb_read_continuous_byte_ready = 1;
+
+    nb_read_continuous_remaining--;
+    if (nb_read_continuous_remaining == 0) {
+        SMB0CN0_ACK = 0;
+        SMB0CN0_STO = 1;
+        SMB0CN0_SI = 0;
+    } else {
+        SMB0CN0_ACK = 1; //(nb_read_continuous_remaining == 1) ? 0 : 1;
+        SMB0CN0_SI = 0;
+    }
 
     return 1;
 }
 
+uint8_t eeprom_read_continuous_get_byte(void)
+{
+    if (!nb_read_continuous_byte_ready) {
+        return 0xFF;
+    }
+
+    nb_read_continuous_byte_ready = 0;
+    return nb_read_byte;
+}
+
+uint8_t eeprom_read_continuous_is_active(void)
+{
+    return (nb_read_continuous_remaining != 0);
+}
+
+/*
 //=============================================================================
 // NON-BLOCKING EEPROM READ FUNCTIONS
 //=============================================================================
@@ -424,19 +509,18 @@ uint8_t eeprom_read_get_byte(void)
 }
 
 //=============================================================================
-// Non-blocking continuous EEPROM read helpers
+// eeprom_page_write - Write a page (up to 128 bytes) to EEPROM (blocking)
+// Parameters: address (16-bit starting address), data (pointer to byte array), length (number of bytes)
+// Returns: 0 if success, 1 if error
 //=============================================================================
-uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
+uint8_t eeprom_page_write(uint16_t address, uint8_t *databytes, uint16_t length)
 {
+    uint16_t i;
     uint16_t wait_count;
     uint8_t smb_status;
 
-    if (length == 0) {
-        return 1;
-    }
-
-    if (nb_read_state != 0 || nb_read_continuous_active) {
-        return 1;  // Busy
+    if (length == 0 || length > 128) {
+        return 1;  // Invalid length
     }
 
     // --- Bus free check
@@ -451,7 +535,7 @@ uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
     SMB0CN0_STA = 1;
     wait_count = 50000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto cont_error;
+    if (wait_count == 0) goto page_write_error;
 
     // --- SLA+W
     SMB0DAT = EEPROM_ADDR;
@@ -460,10 +544,10 @@ uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
 
     wait_count = 10000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto cont_error;
+    if (wait_count == 0) goto page_write_error;
 
     smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto cont_error;
+    if (smb_status != SMB_MTDB) goto page_write_error;
 
     // --- address high byte
     SMB0DAT = (address >> 8) & 0xFF;
@@ -471,10 +555,10 @@ uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
 
     wait_count = 10000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto cont_error;
+    if (wait_count == 0) goto page_write_error;
 
     smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto cont_error;
+    if (smb_status != SMB_MTDB) goto page_write_error;
 
     // --- address low byte
     SMB0DAT = address & 0xFF;
@@ -482,96 +566,45 @@ uint8_t eeprom_read_continuous_start(uint16_t address, uint16_t length)
 
     wait_count = 10000;
     while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto cont_error;
+    if (wait_count == 0) goto page_write_error;
 
     smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto cont_error;
+    if (smb_status != SMB_MTDB) goto page_write_error;
 
-    // --- REPEATED START (terminates write, starts read)
-    SMB0CN0_STA = 1;
+    // --- Write all data bytes
+    for (i = 0; i < length; i++) {
+        SMB0DAT = databytes[i];
+        SMB0CN0_SI = 0;
+
+        wait_count = 10000;
+        while ((SMB0CN0_SI == 0) && wait_count--);
+        if (wait_count == 0) goto page_write_error;
+
+        smb_status = SMB0CN0 & 0xF0;
+        if (smb_status != SMB_MTDB) goto page_write_error;
+    }
+
+    // --- STOP
+    SMB0CN0_STO = 1;
     SMB0CN0_SI = 0;
 
     wait_count = 10000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto cont_error;
+    while ((SMB0CN0_STO == 1) && wait_count--);
 
-    // --- SLA+R
-    SMB0DAT = EEPROM_ADDR + 1;
-    SMB0CN0_STA = 0;
-    SMB0CN0_SI = 0;
-
-    wait_count = 10000;
-    while ((SMB0CN0_SI == 0) && wait_count--);
-    if (wait_count == 0) goto cont_error;
-
-    smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MTDB) goto cont_error;
-
-    // Prepare for first byte
-    SMB0CN0_ACK = (length > 1) ? 1 : 0;
-    SMB0CN0_SI = 0;
-
-    nb_read_continuous_active = 1;
-    nb_read_continuous_remaining = length;
-    nb_read_ready = 0;
+    // Wait for EEPROM write cycle to complete (typical 5ms)
+    waitNms(10);
 
     return 0;
 
-cont_error:
+page_write_error:
     NUM_ERRORS++;
     SMB0CN0_STO = 1;
     SMB0CN0_SI = 0;
-    return 1;
-}
 
-uint8_t eeprom_read_continuous_poll(void)
-{
-    uint8_t smb_status;
-
-    if (!nb_read_continuous_active) {
-        return 0;
-    }
-
-    if (!SMB0CN0_SI) {
-        return 0;
-    }
-
-    smb_status = SMB0CN0 & 0xF0;
-    if (smb_status != SMB_MRDB) {
-        NUM_ERRORS++;
-        nb_read_continuous_active = 0;
-        return 0;
-    }
-
-    nb_read_byte = SMB0DAT;
-    nb_read_ready = 1;
-
-    nb_read_continuous_remaining--;
-    if (nb_read_continuous_remaining == 0) {
-        SMB0CN0_STO = 1;
-        SMB0CN0_SI = 0;
-        nb_read_continuous_active = 0;
-    } else {
-        SMB0CN0_ACK = (nb_read_continuous_remaining == 1) ? 0 : 1;
-        SMB0CN0_SI = 0;
-    }
+    wait_count = 10000;
+    while ((SMB0CN0_STO == 1) && wait_count--);
 
     return 1;
-}
-
-uint8_t eeprom_read_continuous_get_byte(void)
-{
-    if (!nb_read_ready) {
-        return 0xFF;
-    }
-
-    nb_read_ready = 0;
-    return nb_read_byte;
-}
-
-uint8_t eeprom_read_continuous_is_active(void)
-{
-    return nb_read_continuous_active;
 }
 
 //=============================================================================
@@ -803,3 +836,5 @@ uint8_t test_verify_flash_data(void)
     // Return 0 if all bytes match, 1 if any mismatch found
     return (NUM_ERRORS == 0) ? 0 : 1;
 }
+
+*/

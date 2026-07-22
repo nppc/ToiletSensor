@@ -38,6 +38,8 @@ SI_SBIT(SCL, SFR_P0, 3);
 // Function PROTOTYPES
 //-----------------------------------------------------------------------------
 
+void i2c_init(void);
+
 // EEPROM read helpers
 uint8_t eeprom_read_byte_simple(uint16_t address);
 uint8_t eeprom_read_start(uint16_t address);

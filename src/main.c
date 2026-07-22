@@ -13,9 +13,25 @@ void SiLabs_Startup(void) {
 
 }
 
+//uint8_t xdata testBuffer[70];
+
 int main(void) {
-//  uint8_t retval;
+
+//  uint8_t i;
   enter_DefaultMode_from_RESET();
+
+//  for(i=0;i<70;i++){testBuffer[i]=0;}
+
+  i2c_init();
+
+//  eeprom_read_continuous_start(0,10); // start reading 10 bytes
+//
+//  for(i=0;i<10;i++){
+//    while(!eeprom_read_continuous_poll());
+//    testBuffer[i] = eeprom_read_continuous_get_byte();
+//  }
+//
+//  while(1){};
 
   //test_write_flash_data();
 
