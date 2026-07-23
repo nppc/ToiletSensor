@@ -548,7 +548,7 @@ continuous_error:
 //=============================================================================
 void test_write_flash_data(void)
 {
-    extern const uint8_t code g_adpcmFlashData_kvashimuslugam[];
+    extern const uint8_t code g_kvashimuslugam_mulaw_ulaw[];
     uint16_t address = 11264;
     uint16_t bytes_written = 0;
     uint16_t total_bytes = 8192;
@@ -567,7 +567,7 @@ void test_write_flash_data(void)
         }
         
         // Write one page
-        result = eeprom_page_write(address, (uint8_t *)&g_adpcmFlashData_kvashimuslugam[bytes_written], bytes_to_write);
+        result = eeprom_page_write(address, (uint8_t *)&g_kvashimuslugam_mulaw_ulaw[bytes_written], bytes_to_write);
         
         if (result != 0) {
             NUM_ERRORS++;

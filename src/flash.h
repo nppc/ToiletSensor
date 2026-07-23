@@ -18,4 +18,6 @@
 /* External flash array: declare in your main code or linker script. */
 extern const uint8_t code g_adpcmFlashData[];
 
+extern const uint8_t code g_kvashimuslugam_mulaw_ulaw[];
+
 #endif /* SRC_FLASH_H_ */

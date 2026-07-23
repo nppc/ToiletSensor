@@ -3,7 +3,9 @@
 #include "main.h"
 #include "InitDevice.h"
 #include "i2c.h"
+#include "player.h"
 #include "adpcm_decoder.h"
+#include "mulaw_decoder.h"
 //#include "flash.h"
 
 void SiLabs_Startup(void) {
@@ -26,17 +28,23 @@ int main(void) {
 
 //  retval = test_verify_flash_data();
 
-  ADPCM_Start(11264, 8192);
 
 
   while(1){
-
-      //ADPCM_Task();
-      ADPCM_Task_interpolated();
-
-      if(!ADPCM_IsBusy()){
-          waitNms(500);
-          ADPCM_Start(11264, 8192);
+      player_Start();
+      ADPCM_Start(11264, 8192);
+      while(player_IsBusy()){
+          ADPCM_Task_interpolated();
       }
+
+      waitNms(500);
+
+      player_Start();
+      MULAW_Start(0, G_KVASHIMUSLUGAM_MULAW_ULAW_LENGTH);
+      while(player_IsBusy()){
+          MULAW_Task_interpolated();
+      }
+
+      waitNms(2000);
   }
 }

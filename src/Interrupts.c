@@ -9,7 +9,7 @@
 
 // USER INCLUDES
 #include "main.h"
-#include "adpcm_decoder.h"
+#include "player.h"
 
 //-----------------------------------------------------------------------------
 // TIMER3_ISR
@@ -44,8 +44,8 @@ SI_INTERRUPT (TIMER3_ISR, TIMER3_IRQn)
     else
       {
         // Buffer underrun: play silence.
-        DAC0L = (uint8_t)(ADPCM_DAC_MIDPOINT & 0xFF);
-        DAC0H = (uint8_t)((ADPCM_DAC_MIDPOINT >> 8) & 0xFF);
+        DAC0L = (uint8_t)(DAC_MIDPOINT & 0xFF);
+        DAC0H = (uint8_t)((DAC_MIDPOINT >> 8) & 0xFF);
       }
 
   }
