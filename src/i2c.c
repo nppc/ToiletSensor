@@ -323,7 +323,7 @@ uint8_t eeprom_read_continuous_get_byte(void)
     return nb_read_byte;
 }
 
-/*
+
 //=============================================================================
 // eeprom_page_write - Write a page (up to 128 bytes) to EEPROM (blocking)
 // Parameters: address (16-bit starting address), data (pointer to byte array), length (number of bytes)
@@ -422,7 +422,7 @@ page_write_error:
 
     return 1;
 }
-
+/*
 //=============================================================================
 // eeprom_read_continuous - Read multiple bytes from EEPROM in one transaction
 // Parameters: address (16-bit starting address), buffer (destination), length (number of bytes)
@@ -540,6 +540,7 @@ continuous_error:
 
     return 1;
 }
+*/
 
 //=============================================================================
 // test_write_flash_data - Write g_adpcmFlashData array to EEPROM starting at address 0
@@ -547,10 +548,10 @@ continuous_error:
 //=============================================================================
 void test_write_flash_data(void)
 {
-    extern const uint8_t code g_adpcmFlashData[];
-    uint16_t address = 0;
+    extern const uint8_t code g_adpcmFlashData_kvashimuslugam[];
+    uint16_t address = 11264;
     uint16_t bytes_written = 0;
-    uint16_t total_bytes = 11264;
+    uint16_t total_bytes = 8192;
     uint8_t page_size = 128;
     uint8_t result;
     
@@ -566,7 +567,7 @@ void test_write_flash_data(void)
         }
         
         // Write one page
-        result = eeprom_page_write(address, (uint8_t *)&g_adpcmFlashData[bytes_written], bytes_to_write);
+        result = eeprom_page_write(address, (uint8_t *)&g_adpcmFlashData_kvashimuslugam[bytes_written], bytes_to_write);
         
         if (result != 0) {
             NUM_ERRORS++;
@@ -579,7 +580,7 @@ void test_write_flash_data(void)
     
     // If all pages written successfully, NUM_ERRORS should be 0
 }
-
+/*
 //=============================================================================
 // test_verify_flash_data - Verify g_adpcmFlashData was written correctly to EEPROM
 // Reads back the data and compares with original

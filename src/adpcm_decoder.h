@@ -13,7 +13,7 @@ extern uint8_t g_pcmRd;            // FIFO read index (wraps automatically).
 extern uint8_t g_pcmWr;            // FIFO write index (wraps automatically).
 extern bit g_bufferValid;
 
-extern void ADPCM_Start(uint16_t streamLength);
+extern void ADPCM_Start(uint16_t startAddress, uint16_t streamLength);
 extern bit ADPCM_IsBusy(void);
 extern void ADPCM_Task(void);
 extern void ADPCM_Task_interpolated(void);

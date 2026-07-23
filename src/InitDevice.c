@@ -243,6 +243,10 @@ DAC_0_enter_DefaultMode_from_RESET (void)
   // [DAC0CF0 - DAC0 Configuration 0]$
 
   // $[DAC0CF1 - DAC0 Configuration 1]
+  /***********************************************************************
+   - DAC output gain is 2
+   ***********************************************************************/
+  DAC0CF1 = DAC0CF1_DRVGAIN__GAIN_2P0;
   // [DAC0CF1 - DAC0 Configuration 1]$
 
 }
@@ -267,6 +271,11 @@ DACGCF_0_enter_DefaultMode_from_RESET (void)
   // [DACGCF0 - DAC Global Configuration 0]$
 
   // $[DACGCF2 - DAC Global Configuration 2]
+  /***********************************************************************
+   - Selected reference will be attenuated by a factor of 2
+   - Selected reference will be attenuated by a factor of 2.4 
+   ***********************************************************************/
+  DACGCF2 = DACGCF2_D01REFGN__ATTEN_2P0 | DACGCF2_D23REFGN__ATTEN_2P4;
   // [DACGCF2 - DAC Global Configuration 2]$
 
 }
@@ -279,10 +288,10 @@ VREF_0_enter_DefaultMode_from_RESET (void)
 {
   // $[REF0CN - Voltage Reference Control]
   /***********************************************************************
-   - 2.4 V reference output to VREF pin
+   - 1.2 V reference output to VREF pin
    ***********************************************************************/
   SFRPAGE = 0x00;
-  REF0CN = REF0CN_VREFSL__VREF_2P4;
+  REF0CN = REF0CN_VREFSL__VREF_1P2;
   // [REF0CN - Voltage Reference Control]$
 
 }

@@ -20,11 +20,13 @@ int main(void) {
 
   i2c_init();
 
-  //test_write_flash_data();
+
+//  waitNms(10000);
+//  test_write_flash_data();
 
 //  retval = test_verify_flash_data();
 
-  ADPCM_Start(11264);
+  ADPCM_Start(11264, 8192);
 
 
   while(1){
@@ -34,7 +36,7 @@ int main(void) {
 
       if(!ADPCM_IsBusy()){
           waitNms(500);
-          ADPCM_Start(11264);
+          ADPCM_Start(11264, 8192);
       }
   }
 }

@@ -1,5 +1,5 @@
 #include "main.h"
-#define VOICESINEWAVE
+//#define VOICESINEWAVE
 //#define VOICE30
 //#define VOICE50
 //#define VOICE75
@@ -10,7 +10,7 @@
 //#define VOICEPUSTOJ
 //#define VOICEZAPOLNENO
 //#define VOICEOBLEGCHENIJE
-//#define VOICEKVASHIMUSLUGAM
+#define VOICEKVASHIMUSLUGAM
 
 
 /*

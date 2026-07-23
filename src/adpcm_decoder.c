@@ -61,11 +61,11 @@ bit      g_bufferValid;         /* Set when buffer has at least one sample ready
 bit      g_headerSamplePending; /* Set when the block header's verbatim predictor still needs */
 uint8_t  g_pcmWr;               /* FIFO write index (0-255, wraps naturally). */
 uint8_t g_pcmRd;               /* FIFO read index (0-255, wraps naturally). */
-uint16_t g_pendingSample;
+int16_t g_pendingSample;
 bit      g_havePendingSample;
 
-/* Interpolation state: keep previous decoded sample to average with current. */
-uint16_t g_prevDecodedSample;
+/* Interpolation state: keep previous decoded raw sample to average with current. */
+int16_t g_prevDecodedSample;
 bit      g_havePrevSample;      /* Set when g_prevDecodedSample is valid. */
 bit      g_interpolateNext;     /* Set when we need to push average before pushing real sample. */
 
@@ -109,13 +109,11 @@ static bit ADPCM_PcmFifoPush(uint16_t sample)
    g_bufferValid = 1;  /* Mark buffer as having valid data. */
    return 1;
 }
-static uint16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t *stepIndex)
+static int16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t *stepIndex)
 {
    int16_t step;
    int16_t diff;
    int16_t nextIndex;
-   int16_t dacSample;
-   uint16_t dacValue;
    /* Clamp step index (rare, but safe). */
    if(*stepIndex > 88u)
        *stepIndex = 88u;
@@ -142,9 +140,15 @@ static uint16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t
    else if(nextIndex > 88)
        nextIndex = 88;
    *stepIndex = (uint8_t)nextIndex;
+   return *predictor;
+}
+
+static uint16_t ADPCM_ScaleToDacSample(int16_t pcmSample)
+{
+   int16_t dacSample;
+   uint16_t dacValue;
+
    /*
-    * Convert predictor to 12-bit DAC value.
-    *
     * The predictor is a full-range signed 16-bit sample (+/-32767), but the
     * DAC only has 12 bits of unsigned range (0-4095, i.e. +/-2047 around
     * the midpoint). Simply adding the midpoint without scaling clips almost
@@ -154,7 +158,7 @@ static uint16_t ADPCM_DecodeNibble(uint8_t bytecode, int16_t *predictor, uint8_t
     * evenly into the DAC's window. This is a single arithmetic shift, which
     * is cheap even on an 8-bit core.
     */
-   dacSample = (int16_t)(*predictor >> 4);
+   dacSample = (int16_t)(pcmSample >> 4);
    dacValue  = (uint16_t)(dacSample + ADPCM_DAC_MIDPOINT);
    if(dacValue > 4095u)
        dacValue = 4095u;
@@ -233,7 +237,7 @@ static bit ADPCM_AdvanceToNextBlock(void)
 /*===========================================================================
    PUBLIC API
 ===========================================================================*/
-void ADPCM_Start(uint16_t streamLength)
+void ADPCM_Start(uint16_t startAddress, uint16_t streamLength)
 {
    g_streamLength = streamLength;
 
@@ -259,7 +263,7 @@ void ADPCM_Start(uint16_t streamLength)
    ADPCM_ResetPcmFifo();  /* Prefills with silence and resets indices. */
 
    /* Start ONE continuous EEPROM read of the whole stream */
-   if(eeprom_read_continuous_start(0u, streamLength) != 0)
+   if(eeprom_read_continuous_start(startAddress, streamLength) != 0)
     {
         g_playing = 0;
         return;
@@ -278,7 +282,7 @@ bit ADPCM_IsBusy(void)
    Heavy path: block boundary handling and ADPCM decode. This stays in the
    background task so the interrupt can remain trivial.
 ===========================================================================*/
-static bit ADPCM_DecodeOneSample(uint16_t *sampleOut)
+static bit ADPCM_DecodeOneSample(int16_t *sampleOut)
 {
    uint8_t bytecode;
    uint8_t byteValue;
@@ -295,18 +299,11 @@ static bit ADPCM_DecodeOneSample(uint16_t *sampleOut)
        }
        if(g_headerSamplePending)
        {
-           int16_t  dacSample;
-           uint16_t dacValue;
            g_headerSamplePending = 0;
            /* Standard IMA ADPCM: the block header's predictor is a verbatim
-            * 16-bit PCM sample, not nibble-encoded. It must be emitted as the
-            * block's first sample, using the same 16-bit -> 12-bit DAC scaling
-            * as ADPCM_DecodeNibble() applies to every other sample. */
-           dacSample = (int16_t)(g_predictor >> 4);
-           dacValue  = (uint16_t)(dacSample + ADPCM_DAC_MIDPOINT);
-           if(dacValue > 4095u)
-               dacValue = 4095u;
-           *sampleOut = dacValue;
+            * 16-bit PCM sample, not nibble-encoded. Return the raw PCM value
+            * here; a separate helper scales it to the DAC range later. */
+           *sampleOut = g_predictor;
            return 1;
        }
        if(g_blockDone)
@@ -343,6 +340,7 @@ static bit ADPCM_DecodeOneSample(uint16_t *sampleOut)
    Call this from the main loop. It fills the PCM FIFO when space is
    available. The flash read hook is intentionally asynchronous.
 ===========================================================================*/
+/*
 void ADPCM_Task(void)
 {
     while(g_playing)
@@ -350,25 +348,27 @@ void ADPCM_Task(void)
         if(!g_havePendingSample)
         {
             if(!ADPCM_DecodeOneSample(&g_pendingSample))
-                return;  /* No more data. */
+                return;  // No more data.
             g_havePendingSample = 1;
         }
 
         if(!ADPCM_PcmFifoPush(g_pendingSample))
-            return;  /* FIFO full; retry this same sample next call. */
+            return;  // FIFO full; retry this same sample next call. 
 
         g_havePendingSample = 0;
     }
 }
-
+*/
 
 void ADPCM_Task_interpolated(void)
 {
-    uint16_t average;
+    int16_t average;
+    uint16_t dacAverage;
+    uint16_t dacSample;
 
     while(g_playing)
     {
-        /* Make sure we have a decoded sample first. */
+        /* Make sure we have a decoded raw PCM sample first. */
         if(!g_havePendingSample)
         {
             if(!ADPCM_DecodeOneSample(&g_pendingSample))
@@ -381,20 +381,22 @@ void ADPCM_Task_interpolated(void)
            have a previous real sample. */
         if(g_havePrevSample && g_interpolateNext)
         {
-            average = (uint16_t)(((uint32_t)g_prevDecodedSample +
-                                  (uint32_t)g_pendingSample + 1u) >> 1);
+            average = (int16_t)(((int32_t)g_prevDecodedSample +
+                                 (int32_t)g_pendingSample + 1l) >> 1);
+            dacAverage = ADPCM_ScaleToDacSample(average);
 
-            if(!ADPCM_PcmFifoPush(average))
+            if(!ADPCM_PcmFifoPush(dacAverage))
                 return;  /* FIFO full; retry average next call. */
 
             g_interpolateNext = 0;
         }
 
-        /* Then output the real decoded sample. */
-        if(!ADPCM_PcmFifoPush(g_pendingSample))
+        /* Then scale and output the real decoded sample. */
+        dacSample = ADPCM_ScaleToDacSample(g_pendingSample);
+        if(!ADPCM_PcmFifoPush(dacSample))
             return;  /* FIFO full; retry this sample next call. */
 
-        /* Save it as previous sample. */
+        /* Save the raw sample as previous sample. */
         g_prevDecodedSample = g_pendingSample;
         g_havePrevSample = 1;
 

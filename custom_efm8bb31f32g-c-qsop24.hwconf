@@ -8,9 +8,11 @@
     <property object="CLOCK_0" propertyId="clock.clockselect.selectclocksource" value="Internal High Frequency Oscillator 1"/>
     <property object="CROSSBAR0" propertyId="xbar0.smbus0.clockdata" value="Enabled"/>
     <property object="DACGCF_0" propertyId="ABPeripheral.included" value="true"/>
+    <property object="DACGCF_0" propertyId="dacgcf.dac01configuration.dac01referencebuffergain" value="Gain is 1/2.0"/>
     <property object="DACGCF_0" propertyId="dacgcf.dac01configuration.dac01referencevoltageselection" value="VREF"/>
     <property object="DAC_0" propertyId="ABPeripheral.included" value="true"/>
     <property object="DAC_0" propertyId="dac.enable.enabledac#" value="Enabled"/>
+    <property object="DAC_0" propertyId="dac.outputconfiguration.outputbuffergain" value="Gain is 2.0"/>
     <property object="DAC_1" propertyId="ABPeripheral.included" value="true"/>
     <property object="DAC_2" propertyId="ABPeripheral.included" value="true"/>
     <property object="DAC_3" propertyId="ABPeripheral.included" value="true"/>
@@ -70,8 +72,8 @@
     <property object="TIMER_SETUP_0" propertyId="timer_setup.timer1.timerrunningstate" value="Timer is Running"/>
     <property object="TIMER_SETUP_0" propertyId="timer_setup.timer1.timerswitch1:runcontrol" value="Start"/>
     <property object="VREF_0" propertyId="ABPeripheral.included" value="true"/>
-    <property object="VREF_0" propertyId="vref.control.voltagereferenceselection" value="Internal 2.4V (output to VREF pin)"/>
-    <property object="VREF_0" propertyId="vref.control.vrefoutput" value="2.4 V Reference"/>
+    <property object="VREF_0" propertyId="vref.control.voltagereferenceselection" value="Internal 1.2V (output to VREF pin)"/>
+    <property object="VREF_0" propertyId="vref.control.vrefoutput" value="1.2 V Reference"/>
     <property object="WDT_0" propertyId="ABPeripheral.included" value="true"/>
     <property object="WDT_0" propertyId="wdt.watchdogcontrol.wdtenable" value="Disable"/>
   </mode>
