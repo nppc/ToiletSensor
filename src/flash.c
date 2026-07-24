@@ -1,17 +1,18 @@
 #include "main.h"
+//#define VOICEBAK //3584
+//#define VOICEZAPOLNENO //5632
+//#define VOICE30 //3328
+//#define VOICE50 //3072
+//#define VOICE75 //6144
+//#define VOICEPROCENTOV //4608
+//#define VOICEPOCHTI //3328
+//#define VOICEPOLNY //4096
+//#define VOICEPUSTOJ //4096
+//#define VOICEOBLEGCHENIJE //5888
+//#define VOICEKVASHIMUSLUGAM //8192
+
 //#define VOICESINEWAVE
-//#define VOICE30
-//#define VOICE50
-//#define VOICE75
-//#define VOICEPROCENTOV
-//#define VOICEBAK
-//#define VOICEPOCHTI
-//#define VOICEPOLNY
-//#define VOICEPUSTOJ
-//#define VOICEZAPOLNENO
-//#define VOICEOBLEGCHENIJE
-//#define VOICEKVASHIMUSLUGAM
-#define KVASHIMUSLUGAM_MULAW
+//#define KVASHIMUSLUGAM_MULAW
 
 /*
  * File                    : C:\Users\ppalonen\Downloads\sine_10k.wav

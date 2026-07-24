@@ -5,8 +5,8 @@
 #include "i2c.h"
 #include "player.h"
 #include "adpcm_decoder.h"
-#include "mulaw_decoder.h"
 //#include "flash.h"
+//#include "mulaw_decoder.h"
 
 void SiLabs_Startup(void) {
   // $[SiLabs Startup]
@@ -22,29 +22,65 @@ int main(void) {
 
   i2c_init();
 
+  waitNms(4000);
 
 //  waitNms(10000);
-//  test_write_flash_data();
 
-//  retval = test_verify_flash_data();
-
-
+//  eeprom_write_test(PLAY_BAK, g_adpcmFlashData_bak);
+//  eeprom_write_test(PLAY_ZAPOLNENO, g_adpcmFlashData_zapolneno);
+//  eeprom_write_test(PLAY_30, g_adpcmFlashData_30);
+//  eeprom_write_test(PLAY_50, g_adpcmFlashData_50);
+//  eeprom_write_test(PLAY_75, g_adpcmFlashData_75);
+//  eeprom_write_test(PLAY_PROCENTOV, g_adpcmFlashData_procentov);
+//  eeprom_write_test(PLAY_POCHTI, g_adpcmFlashData_pochti);
+//  eeprom_write_test(PLAY_POLNY, g_adpcmFlashData_polny);
+//  eeprom_write_test(PLAY_PUSTOJ, g_adpcmFlashData_pustoj);
+//  eeprom_write_test(PLAY_OBLEGCHENIJE, g_adpcmFlashData_oblegchenije);
+//  eeprom_write_test(PLAY_KVASHIMUSLUGAM, g_adpcmFlashData_kvashimuslugam);
+//51968
 
   while(1){
-      player_Start();
-      ADPCM_Start(11264, 8192);
-      while(player_IsBusy()){
-          ADPCM_Task_interpolated();
-      }
 
-      waitNms(500);
+      player_play_sample(PLAY_KVASHIMUSLUGAM);
 
-      player_Start();
-      MULAW_Start(0, G_KVASHIMUSLUGAM_MULAW_ULAW_LENGTH);
-      while(player_IsBusy()){
-          MULAW_Task_interpolated();
-      }
+      waitNms(1000);
 
-      waitNms(2000);
+      player_play_sample(PLAY_BAK);
+      player_play_sample(PLAY_PUSTOJ);
+
+      waitNms(1000);
+
+      player_play_sample(PLAY_ZAPOLNENO);
+      player_play_sample(PLAY_30);
+      player_play_sample(PLAY_PROCENTOV);
+
+      waitNms(1000);
+
+      player_play_sample(PLAY_ZAPOLNENO);
+      player_play_sample(PLAY_50);
+      player_play_sample(PLAY_PROCENTOV);
+
+      waitNms(1000);
+
+      player_play_sample(PLAY_ZAPOLNENO);
+      player_play_sample(PLAY_75);
+      player_play_sample(PLAY_PROCENTOV);
+
+      waitNms(1000);
+
+      player_play_sample(PLAY_BAK);
+      player_play_sample(PLAY_POCHTI);
+      player_play_sample(PLAY_POLNY);
+
+      waitNms(1000);
+
+      player_play_sample(PLAY_BAK);
+      player_play_sample(PLAY_POLNY);
+
+      waitNms(1000);
+
+      player_play_sample(PLAY_OBLEGCHENIJE);
+
+      waitNms(4000);
   }
 }

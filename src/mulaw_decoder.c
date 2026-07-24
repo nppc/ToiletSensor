@@ -96,8 +96,8 @@ bit MULAW_DecodeOneSample(int16_t *sampleOut)
         g_playing = 0;
         return 0;  /* No byte available. */
     }
-
-    rawByte = g_kvashimuslugam_mulaw_ulaw[g_mulawDataCounter];
+// TODO: uncomment for use
+//    rawByte = g_kvashimuslugam_mulaw_ulaw[g_mulawDataCounter];
     *sampleOut = g_mulawTable[rawByte];
     g_mulawDataCounter++;
     return 1;

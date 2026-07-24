@@ -1,5 +1,6 @@
 #include "main.h"
 #include "player.h"
+#include "adpcm_decoder.h"
 
 /*
 * PCM buffer in XRAM.
@@ -70,8 +71,9 @@ void player_ResetFifoBuffer(void)
 {
    uint16_t i;
 
-   /* Prefill buffer with silence (2048 = midpoint). */
-   for(i = 0u; i < PLAYER_BUF_SIZE; i++)
+   /* Prefill buffer with silence (2048 = midpoint).
+    * Only need to prefil the HEADROOM area */
+   for(i = 0u; i < PLAYER_HEADROOM; i++)
    {
        g_pcmBuffer[i].u16 = DAC_MIDPOINT;
    }
@@ -94,4 +96,12 @@ bit player_FifoBufferPush(uint16_t sample)
    g_pcmWr = nextWr;  /* Wraps naturally at 256. */
    g_bufferValid = 1;  /* Mark buffer as having valid data. */
    return 1;
+}
+
+void player_play_sample(uint16_t start_address, uint16_t data_len){
+  player_Start();
+  ADPCM_Start(start_address, data_len);
+  while(player_IsBusy()){
+      ADPCM_Task_interpolated();
+  }
 }

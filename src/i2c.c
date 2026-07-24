@@ -1,6 +1,7 @@
 #include "main.h"
 #include "i2c.h"
 #include "flash.h"
+#include "player.h"
 
 //=============================================================================
 // I2C Polling-Based Implementation for EFM8BB3
@@ -546,40 +547,48 @@ continuous_error:
 // test_write_flash_data - Write g_adpcmFlashData array to EEPROM starting at address 0
 // This writes the entire 11264 byte array in 128-byte pages
 //=============================================================================
-void test_write_flash_data(void)
+void eeprom_write_array(uint16_t start_address, uint16_t data_len, const uint8_t code *data_array)
 {
-    extern const uint8_t code g_kvashimuslugam_mulaw_ulaw[];
-    uint16_t address = 11264;
-    uint16_t bytes_written = 0;
-    uint16_t total_bytes = 8192;
-    uint8_t page_size = 128;
-    uint8_t result;
-    
-    i2c_init();
-    
-    NUM_ERRORS = 0;
-    
-    // Write data in 128-byte pages
-    while (bytes_written < total_bytes) {
-        uint16_t bytes_to_write = total_bytes - bytes_written;
-        if (bytes_to_write > page_size) {
-            bytes_to_write = page_size;
-        }
-        
-        // Write one page
-        result = eeprom_page_write(address, (uint8_t *)&g_kvashimuslugam_mulaw_ulaw[bytes_written], bytes_to_write);
-        
-        if (result != 0) {
-            NUM_ERRORS++;
-            break;  // Stop on error
-        }
-        
-        address += bytes_to_write;
-        bytes_written += bytes_to_write;
-    }
-    
-    // If all pages written successfully, NUM_ERRORS should be 0
+  uint16_t address = start_address;
+  uint16_t bytes_written = 0;
+  const uint8_t page_size = 128;
+  uint8_t result;
+
+  i2c_init();
+
+  NUM_ERRORS = 0;
+
+  while (bytes_written < data_len)
+  {
+      uint16_t bytes_to_write = data_len - bytes_written;
+
+      if (bytes_to_write > page_size)
+      {
+          bytes_to_write = page_size;
+      }
+
+      result = eeprom_page_write(
+          address,
+          (uint8_t *)&data_array[bytes_written],
+          bytes_to_write);
+
+      if (result != 0)
+      {
+          NUM_ERRORS++;
+          break;
+      }
+
+      address += bytes_to_write;
+      bytes_written += bytes_to_write;
+  }
 }
+
+void eeprom_write_test(uint16_t start_address, uint16_t data_len, const uint8_t code *data_array){
+  eeprom_write_array(start_address, data_len, data_array);
+
+  player_play_sample(start_address, data_len);
+}
+
 /*
 //=============================================================================
 // test_verify_flash_data - Verify g_adpcmFlashData was written correctly to EEPROM

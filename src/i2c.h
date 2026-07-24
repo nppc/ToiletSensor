@@ -49,7 +49,8 @@ uint8_t eeprom_read_continuous_get_byte(void);
 
 // Test routine
 //void test_i2c(void);
-void test_write_flash_data(void);
+void eeprom_write_array(uint16_t start_address, uint16_t data_len, const uint8_t code *data_array);
+void eeprom_write_test(uint16_t start_address, uint16_t data_len, const uint8_t code *data_array);
 bit test_verify_flash_data(void);
 
 #endif /* SRC_I2C_H_ */
